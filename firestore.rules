@@ -104,7 +104,8 @@ service cloud.firestore {
           'absent',
           'late_unannounced',
           'absent_unannounced',
-          'absent_late_notice'
+          'absent_late_notice',
+          'no_convocado'
         ]
         && (data.note == null
           || (data.note is string && data.note.size() <= 180))

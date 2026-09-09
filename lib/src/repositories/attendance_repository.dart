@@ -6,6 +6,27 @@ import '../models/attendance.dart';
 
 enum AttendanceWriteKind { set, delete }
 
+/// Firestore security rules cap a batched write at 20 `get()`/`exists()`
+/// calls in total. Each attendance write in a batch triggers a lookup of its
+/// session (and, the first time, the roster membership), so batches must
+/// stay well under that ceiling or Firestore rejects the whole batch with
+/// `permission-denied`.
+const int _maxAttendanceBatchSize = 10;
+
+Iterable<List<T>> _chunked<T>(Iterable<T> items, int size) sync* {
+  var chunk = <T>[];
+  for (final item in items) {
+    chunk.add(item);
+    if (chunk.length == size) {
+      yield chunk;
+      chunk = [];
+    }
+  }
+  if (chunk.isNotEmpty) {
+    yield chunk;
+  }
+}
+
 AttendanceWriteKind planAttendanceWrite({
   required AttendanceStatus status,
   required String note,
@@ -91,19 +112,45 @@ class AttendanceRepository {
     required AttendanceStatus status,
     required String note,
   }) async {
-    final batch = _firestore.batch();
-    for (final sessionId in sessionIds) {
-      final reference = _attendanceReference(sessionId, userId);
-      // An explicit value avoids deleting a missing implicit "Asiste" record,
-      // which would make Firestore reject the entire batch.
-      batch.set(reference, {
-        'status': status.firestoreValue,
-        'note': note.trim().isEmpty ? null : note.trim(),
-        'updatedBy': userId,
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+    final trimmedNote = note.trim().isEmpty ? null : note.trim();
+    for (final chunk
+        in _chunked(sessionIds, _maxAttendanceBatchSize)) {
+      final batch = _firestore.batch();
+      for (final sessionId in chunk) {
+        final reference = _attendanceReference(sessionId, userId);
+        // An explicit value avoids deleting a missing implicit "Asiste"
+        // record, which would make Firestore reject the entire batch.
+        batch.set(reference, {
+          'status': status.firestoreValue,
+          'note': trimmedNote,
+          'updatedBy': userId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
     }
-    await batch.commit();
+  }
+
+  Future<void> saveRosterAttendance({
+    required String sessionId,
+    required Iterable<String> userIds,
+    required AttendanceStatus status,
+    required String note,
+    required String updatedBy,
+  }) async {
+    final trimmedNote = note.trim().isEmpty ? null : note.trim();
+    for (final chunk in _chunked(userIds, _maxAttendanceBatchSize)) {
+      final batch = _firestore.batch();
+      for (final userId in chunk) {
+        batch.set(_attendanceReference(sessionId, userId), {
+          'status': status.firestoreValue,
+          'note': trimmedNote,
+          'updatedBy': updatedBy,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+    }
   }
 
   DocumentReference<Map<String, dynamic>> _attendanceReference(

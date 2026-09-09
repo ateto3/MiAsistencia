@@ -455,6 +455,9 @@ class _PlayerAttendancePanelState
                         Icon(
                           attendance.status == AttendanceStatus.notApplicable
                               ? Icons.group_off_outlined
+                              : attendance.status ==
+                                    AttendanceStatus.noConvocado
+                              ? Icons.block_outlined
                               : attendance.status.isCoachOnly
                               ? Icons.assignment_late_outlined
                               : Icons.lock_clock_outlined,
@@ -465,6 +468,9 @@ class _PlayerAttendancePanelState
                             attendance.status == AttendanceStatus.notApplicable
                                 ? 'Todavía no pertenecías al equipo cuando se '
                                       'celebró esta sesión.'
+                                : attendance.status ==
+                                      AttendanceStatus.noConvocado
+                                ? 'No has sido convocado para esta sesión.'
                                 : attendance.status.isCoachOnly
                                 ? 'El entrenador ha registrado esta incidencia.'
                                 : 'La sesión ha finalizado. Tu asistencia es '
@@ -501,6 +507,86 @@ class _CoachAttendancePanel extends ConsumerStatefulWidget {
 class _CoachAttendancePanelState
     extends ConsumerState<_CoachAttendancePanel> {
   AttendanceStatus? _selectedStatus;
+  bool _selectionMode = false;
+  bool _bulkSaving = false;
+  final Set<String> _selectedMemberIds = {};
+
+  void _enterSelectionMode(String memberId) {
+    setState(() {
+      _selectionMode = true;
+      _selectedMemberIds.add(memberId);
+    });
+  }
+
+  void _toggleSelection(String memberId) {
+    setState(() {
+      if (!_selectedMemberIds.add(memberId)) {
+        _selectedMemberIds.remove(memberId);
+      }
+      if (_selectedMemberIds.isEmpty) {
+        _selectionMode = false;
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    setState(() {
+      _selectionMode = false;
+      _selectedMemberIds.clear();
+    });
+  }
+
+  Future<void> _applyBulkStatus({
+    required Map<String, AttendanceRecord> attendance,
+  }) async {
+    final members = _selectedMemberIds
+        .map((id) => attendance[id])
+        .whereType<AttendanceRecord>()
+        .toList();
+    if (members.isEmpty) {
+      return;
+    }
+    final draft = await showAttendanceEditor(
+      context: context,
+      initialValue: members.first,
+      title: 'Aplicar estado a ${members.length} jugadores',
+      showCoachOptions: true,
+    );
+    if (draft == null || !mounted) {
+      return;
+    }
+    setState(() => _bulkSaving = true);
+    try {
+      await ref.read(attendanceRepositoryProvider).saveRosterAttendance(
+            sessionId: widget.session.id,
+            userIds: members.map((record) => record.userId),
+            status: draft.status,
+            note: draft.note,
+            updatedBy: widget.currentUser.id,
+          );
+      if (!mounted) {
+        return;
+      }
+      showAppNotification(
+        context,
+        message: 'Asistencia actualizada para ${members.length} jugadores.',
+        type: AppNotificationType.success,
+      );
+      _exitSelectionMode();
+    } on FirebaseException {
+      if (mounted) {
+        showAppNotification(
+          context,
+          message: 'No se pudo guardar el estado.',
+          type: AppNotificationType.error,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _bulkSaving = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -565,6 +651,16 @@ class _CoachAttendancePanelState
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
+                if (_selectionMode)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _BulkSelectionToolbar(
+                      selectedCount: _selectedMemberIds.length,
+                      saving: _bulkSaving,
+                      onApply: () => _applyBulkStatus(attendance: attendance),
+                      onCancel: _exitSelectionMode,
+                    ),
+                  ),
                 if (members.isEmpty)
                   const EmptyState(
                     icon: Icons.group_off_outlined,
@@ -585,12 +681,18 @@ class _CoachAttendancePanelState
                       child: CoachAttendanceListItem(
                         member: member,
                         record: record,
+                        selectionMode: _selectionMode,
+                        selected: _selectedMemberIds.contains(member.id),
                         updateLabel: record.updatedAt == null
                             ? record.status == AttendanceStatus.notApplicable
                                   ? 'Se unió después de esta sesión'
                                   : 'Estado predeterminado'
                             : _formatUpdatedAt(record.updatedAt!),
                         onTap: () async {
+                          if (_selectionMode) {
+                            _toggleSelection(member.id);
+                            return;
+                          }
                           final draft = await showAttendanceEditor(
                             context: context,
                             initialValue: record,
@@ -608,6 +710,7 @@ class _CoachAttendancePanelState
                             );
                           }
                         },
+                        onLongPress: () => _enterSelectionMode(member.id),
                       ),
                     );
                   }),
@@ -646,6 +749,9 @@ class CoachAttendanceListItem extends StatelessWidget {
     required this.record,
     required this.updateLabel,
     required this.onTap,
+    this.selectionMode = false,
+    this.selected = false,
+    this.onLongPress,
     super.key,
   });
 
@@ -653,20 +759,33 @@ class CoachAttendanceListItem extends StatelessWidget {
   final AttendanceRecord record;
   final String updateLabel;
   final VoidCallback onTap;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final note = record.note?.trim();
     final hasNote = note != null && note.isNotEmpty;
     return Card(
+      color: selected
+          ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.08)
+          : null,
       child: ListTile(
         minTileHeight: hasNote ? 88 : 72,
         isThreeLine: hasNote,
-        leading: CircleAvatar(
-          child: Text(
-            member.fullName.isEmpty ? '?' : member.fullName[0].toUpperCase(),
-          ),
-        ),
+        leading: selectionMode
+            ? Checkbox(
+                value: selected,
+                onChanged: (_) => onTap(),
+              )
+            : CircleAvatar(
+                child: Text(
+                  member.fullName.isEmpty
+                      ? '?'
+                      : member.fullName[0].toUpperCase(),
+                ),
+              ),
         title: Text(member.fullName),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -690,6 +809,55 @@ class CoachAttendanceListItem extends StatelessWidget {
           perspective: AttendanceLabelPerspective.coach,
         ),
         onTap: onTap,
+        onLongPress: onLongPress,
+      ),
+    );
+  }
+}
+
+class _BulkSelectionToolbar extends StatelessWidget {
+  const _BulkSelectionToolbar({
+    required this.selectedCount,
+    required this.saving,
+    required this.onApply,
+    required this.onCancel,
+  });
+
+  final int selectedCount;
+  final bool saving;
+  final VoidCallback onApply;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: 'Cancelar selección',
+              onPressed: saving ? null : onCancel,
+              icon: const Icon(Icons.close),
+            ),
+            Expanded(
+              child: Text(
+                '$selectedCount seleccionado${selectedCount == 1 ? '' : 's'}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ),
+            FilledButton.tonalIcon(
+              onPressed: saving || selectedCount == 0 ? null : onApply,
+              icon: saving
+                  ? const SizedBox.square(
+                      dimension: 17,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.done_all),
+              label: Text(saving ? 'Aplicando…' : 'Aplicar estado'),
+            ),
+          ],
+        ),
       ),
     );
   }

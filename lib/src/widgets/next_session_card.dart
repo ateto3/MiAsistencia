@@ -191,6 +191,15 @@ class _PlayerQuickAttendanceState
               user: widget.user,
               sessionTime: widget.session.startTime,
             );
+        if (current.status.isCoachOnly) {
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: AttendanceBadge(
+              status: current.status,
+              perspective: AttendanceLabelPerspective.player,
+            ),
+          );
+        }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

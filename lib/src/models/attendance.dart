@@ -17,6 +17,7 @@ enum AttendanceStatus {
   lateUnannounced,
   absentUnannounced,
   absentLateNotice,
+  noConvocado,
   notApplicable;
 
   String get firestoreValue => switch (this) {
@@ -29,6 +30,7 @@ enum AttendanceStatus {
     AttendanceStatus.lateUnannounced => 'late_unannounced',
     AttendanceStatus.absentUnannounced => 'absent_unannounced',
     AttendanceStatus.absentLateNotice => 'absent_late_notice',
+    AttendanceStatus.noConvocado => 'no_convocado',
     AttendanceStatus.notApplicable => throw StateError(
       'notApplicable cannot be stored in Firestore.',
     ),
@@ -50,6 +52,7 @@ enum AttendanceStatus {
     AttendanceStatus.lateUnannounced => 'Llegué tarde sin avisar',
     AttendanceStatus.absentUnannounced => 'Falté sin avisar',
     AttendanceStatus.absentLateNotice => 'Avisé tarde de que no iba',
+    AttendanceStatus.noConvocado => 'No convocado',
     AttendanceStatus.notApplicable => '—',
   };
 
@@ -63,6 +66,7 @@ enum AttendanceStatus {
     AttendanceStatus.lateUnannounced => 'Llega tarde sin avisar',
     AttendanceStatus.absentUnannounced => 'Falta sin avisar',
     AttendanceStatus.absentLateNotice => 'Avisa tarde de que no viene',
+    AttendanceStatus.noConvocado => 'No convocado',
     AttendanceStatus.notApplicable => '—',
   };
 
@@ -76,6 +80,7 @@ enum AttendanceStatus {
     AttendanceStatus.lateUnannounced => Icons.timer_off_outlined,
     AttendanceStatus.absentUnannounced => Icons.person_off_outlined,
     AttendanceStatus.absentLateNotice => Icons.notification_important_outlined,
+    AttendanceStatus.noConvocado => Icons.block_outlined,
     AttendanceStatus.notApplicable => Icons.remove_circle_outline,
   };
 
@@ -89,6 +94,7 @@ enum AttendanceStatus {
     AttendanceStatus.lateUnannounced => const Color(0xFFB45309),
     AttendanceStatus.absentUnannounced => const Color(0xFFB42318),
     AttendanceStatus.absentLateNotice => const Color(0xFF9A3412),
+    AttendanceStatus.noConvocado => const Color(0xFF475569),
     AttendanceStatus.notApplicable => const Color(0xFF7A8793),
   };
 
@@ -107,12 +113,14 @@ enum AttendanceStatus {
 
   bool get isAttendancePercentageEligible =>
       this != AttendanceStatus.injured &&
+      this != AttendanceStatus.noConvocado &&
       this != AttendanceStatus.notApplicable;
 
   bool get isCoachOnly =>
       this == AttendanceStatus.lateUnannounced ||
       this == AttendanceStatus.absentUnannounced ||
-      this == AttendanceStatus.absentLateNotice;
+      this == AttendanceStatus.absentLateNotice ||
+      this == AttendanceStatus.noConvocado;
 
   AttendanceStatus get playerEquivalent => switch (this) {
     AttendanceStatus.lateUnannounced => AttendanceStatus.late,
@@ -141,6 +149,7 @@ enum AttendanceStatus {
       'late_unannounced' => AttendanceStatus.lateUnannounced,
       'absent_unannounced' => AttendanceStatus.absentUnannounced,
       'absent_late_notice' => AttendanceStatus.absentLateNotice,
+      'no_convocado' => AttendanceStatus.noConvocado,
       _ => AttendanceStatus.attending,
     };
   }
@@ -233,12 +242,13 @@ CoachAttendanceSummary buildCoachAttendanceSummary({
   );
 
   final eligiblePlayerCount = players.where((player) {
-    return resolveAttendanceStatus(
-          user: player,
-          explicitRecord: attendance[player.id],
-          sessionTime: sessionTime,
-        ) !=
-        AttendanceStatus.notApplicable;
+    final status = resolveAttendanceStatus(
+      user: player,
+      explicitRecord: attendance[player.id],
+      sessionTime: sessionTime,
+    );
+    return status != AttendanceStatus.notApplicable &&
+        status != AttendanceStatus.noConvocado;
   }).length;
 
   return CoachAttendanceSummary(
@@ -320,7 +330,8 @@ PlayerAttendanceStats buildPlayerAttendanceStats({
       explicitRecord: attendanceBySession[session.id]?[player.id],
       sessionTime: session.startTime,
     );
-    if (status == AttendanceStatus.notApplicable) {
+    if (status == AttendanceStatus.notApplicable ||
+        status == AttendanceStatus.noConvocado) {
       continue;
     }
     sessionCount++;
@@ -349,6 +360,7 @@ PlayerAttendanceStats buildPlayerAttendanceStats({
         absenceCount++;
       case AttendanceStatus.injured:
         injuryCount++;
+      case AttendanceStatus.noConvocado:
       case AttendanceStatus.notApplicable:
         break;
     }

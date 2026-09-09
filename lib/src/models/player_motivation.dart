@@ -222,6 +222,7 @@ TeamAttendanceTrend buildTeamAttendanceTrend({
           attendanceBySession: attendanceBySession,
         );
         if (status == AttendanceStatus.injured ||
+            status == AttendanceStatus.noConvocado ||
             status == AttendanceStatus.notApplicable) {
           continue;
         }

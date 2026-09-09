@@ -631,6 +631,129 @@ void main() {
     );
   });
 
+  test('no convocado is coach-only and excluded from player options', () {
+    expect(AttendanceStatus.noConvocado.isCoachOnly, isTrue);
+    expect(
+      AttendanceStatus.coachOnlyOptions,
+      contains(AttendanceStatus.noConvocado),
+    );
+    expect(
+      AttendanceStatus.playerOptions,
+      isNot(contains(AttendanceStatus.noConvocado)),
+    );
+    expect(
+      AttendanceStatus.fromFirestore('no_convocado'),
+      AttendanceStatus.noConvocado,
+    );
+  });
+
+  test('no convocado is fully excluded from player attendance stats', () {
+    const player = AppUser(
+      id: 'p1',
+      email: 'p1@example.com',
+      fullName: 'Jugador',
+      role: UserRole.player,
+      teamId: 'team-1',
+      active: true,
+    );
+    final sessions = [
+      TeamSession(
+        id: 's1',
+        teamId: 'team-1',
+        title: 'Partido',
+        startTime: DateTime(2026, 8, 24, 19),
+        endTime: DateTime(2026, 8, 24, 20, 30),
+      ),
+      TeamSession(
+        id: 's2',
+        teamId: 'team-1',
+        title: 'Partido',
+        startTime: DateTime(2026, 8, 26, 19),
+        endTime: DateTime(2026, 8, 26, 20, 30),
+      ),
+      TeamSession(
+        id: 's3',
+        teamId: 'team-1',
+        title: 'Partido',
+        startTime: DateTime(2026, 8, 28, 19),
+        endTime: DateTime(2026, 8, 28, 20, 30),
+      ),
+    ];
+    final attendanceBySession = {
+      's1': const {
+        'p1': AttendanceRecord(
+          userId: 'p1',
+          status: AttendanceStatus.noConvocado,
+        ),
+      },
+      's2': const {
+        'p1': AttendanceRecord(
+          userId: 'p1',
+          status: AttendanceStatus.attending,
+        ),
+      },
+      's3': const {
+        'p1': AttendanceRecord(
+          userId: 'p1',
+          status: AttendanceStatus.absent,
+        ),
+      },
+    };
+
+    final stats = buildPlayerAttendanceStats(
+      player: player,
+      sessions: sessions,
+      attendanceBySession: attendanceBySession,
+    );
+
+    expect(stats.sessionCount, 2);
+    expect(stats.eligibleSessionCount, 2);
+    expect(stats.attendedSessionCount, 1);
+    expect(stats.attendanceCount, 1);
+    expect(stats.absenceCount, 1);
+  });
+
+  test('no convocado is excluded from the coach summary roster', () {
+    const players = [
+      AppUser(
+        id: 'called',
+        email: 'called@example.com',
+        fullName: 'Ana',
+        role: UserRole.player,
+        teamId: 'team-1',
+        active: true,
+      ),
+      AppUser(
+        id: 'rested',
+        email: 'rested@example.com',
+        fullName: 'Bruno',
+        role: UserRole.player,
+        teamId: 'team-1',
+        active: true,
+      ),
+    ];
+    final attendance = {
+      'called': const AttendanceRecord(
+        userId: 'called',
+        status: AttendanceStatus.attending,
+      ),
+      'rested': const AttendanceRecord(
+        userId: 'rested',
+        status: AttendanceStatus.noConvocado,
+      ),
+    };
+
+    final summary = buildCoachAttendanceSummary(
+      members: players,
+      attendance: attendance,
+      sessionTime: DateTime(2026, 8, 24),
+    );
+
+    expect(summary.totalPlayers, 1);
+    expect(summary.courtCount, 1);
+    expect(summary.physicalCount, 1);
+  });
+
   testWidgets('batch edit offers independent name and time changes', (
     tester,
   ) async {

@@ -574,6 +574,7 @@ double participationForAttendanceChart(AttendanceStatus status) {
     case AttendanceStatus.absentUnannounced:
     case AttendanceStatus.absentLateNotice:
     case AttendanceStatus.injured:
+    case AttendanceStatus.noConvocado:
     case AttendanceStatus.notApplicable:
       return 0.0;
   }
