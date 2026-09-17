@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'models/app_user.dart';
+import 'models/attendance.dart';
 import 'models/team_membership.dart';
 import 'models/team_session.dart';
 import 'repositories/attendance_repository.dart';
@@ -58,22 +59,32 @@ final teamInvitationNameProvider = FutureProvider.family<String?, String>(
 final teamSessionsProvider = StreamProvider.family<List<TeamSession>, String>(
   (ref, teamId) => ref.watch(sessionRepositoryProvider).watchSessions(teamId),
 );
+
+/// Shared per-team attendance history, read from the server-maintained
+/// `teams/{teamId}/attendanceIndex` mirror instead of one listener per
+/// session. Being a single Riverpod provider (rather than a stream each
+/// widget opens itself) means the coach team overview, player detail
+/// screen, and dashboard panel all reuse the same subscription.
+final teamAttendanceIndexProvider =
+    StreamProvider.family<Map<String, Map<String, AttendanceRecord>>, String>(
+      (ref, teamId) => ref
+          .watch(attendanceRepositoryProvider)
+          .watchTeamAttendanceIndex(teamId),
+    );
 final membershipsForUserProvider =
     StreamProvider.family<List<TeamMembership>, String>(
-  (ref, userId) => ref
-      .watch(teamRepositoryProvider)
-      .watchMembershipsForUser(userId),
-);
+      (ref, userId) =>
+          ref.watch(teamRepositoryProvider).watchMembershipsForUser(userId),
+    );
 final teamMembersProvider = StreamProvider.family<List<TeamMembership>, String>(
   (ref, teamId) => ref.watch(teamRepositoryProvider).watchTeamMembers(teamId),
 );
-final membershipProvider = StreamProvider.family<
-    TeamMembership?,
-    ({String teamId, String memberId})>(
-  (ref, key) => ref
-      .watch(teamRepositoryProvider)
-      .watchMembership(key.teamId, key.memberId),
-);
+final membershipProvider =
+    StreamProvider.family<TeamMembership?, ({String teamId, String memberId})>(
+      (ref, key) => ref
+          .watch(teamRepositoryProvider)
+          .watchMembership(key.teamId, key.memberId),
+    );
 final currentFirebaseUserProvider = Provider<User?>((ref) {
   return ref.watch(authStateProvider).value;
 });
@@ -94,33 +105,46 @@ final currentMembershipProvider = Provider<TeamMembership?>((ref) {
   return ref.watch(activeMembershipProvider(appUser.id)).value;
 });
 
-final activeMembershipProvider = Provider.family<AsyncValue<TeamMembership?>, String>(
-  (ref, userId) {
-    final memberships = ref.watch(membershipsForUserProvider(userId));
-    final profile = ref.watch(userProfileProvider(userId));
-    if (memberships.hasError || profile.hasError) {
-      return AsyncValue.error(
-        memberships.hasError ? memberships.error! : profile.error!,
-        memberships.hasError
-            ? memberships.stackTrace!
-            : profile.stackTrace!,
-      );
-    }
-    if (memberships.isLoading || profile.isLoading) {
-      return const AsyncValue.loading();
-    }
-    final active = memberships.value
-            ?.where((membership) => membership.active)
-            .toList() ??
-        const <TeamMembership>[];
-    if (active.isEmpty) {
-      return const AsyncValue.data(null);
-    }
-    final activeTeamId = profile.value?.activeTeamId;
-    final resolved = active.firstWhere(
-      (membership) => membership.teamId == activeTeamId,
-      orElse: () => active.first,
+/// Whether the "Rendimiento" KPI card on the coach's player detail screen is
+/// expanded. Kept outside the screen's widget state so it survives
+/// navigating between players (which replaces the screen instance).
+class PlayerPerformanceCardExpandedNotifier extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void set(bool value) => state = value;
+}
+
+final playerPerformanceCardExpandedProvider =
+    NotifierProvider<PlayerPerformanceCardExpandedNotifier, bool>(
+      PlayerPerformanceCardExpandedNotifier.new,
     );
-    return AsyncValue.data(resolved);
-  },
-);
+
+final activeMembershipProvider =
+    Provider.family<AsyncValue<TeamMembership?>, String>((ref, userId) {
+      final memberships = ref.watch(membershipsForUserProvider(userId));
+      final profile = ref.watch(userProfileProvider(userId));
+      if (memberships.hasError || profile.hasError) {
+        return AsyncValue.error(
+          memberships.hasError ? memberships.error! : profile.error!,
+          memberships.hasError ? memberships.stackTrace! : profile.stackTrace!,
+        );
+      }
+      if (memberships.isLoading || profile.isLoading) {
+        return const AsyncValue.loading();
+      }
+      final active =
+          memberships.value
+              ?.where((membership) => membership.active)
+              .toList() ??
+          const <TeamMembership>[];
+      if (active.isEmpty) {
+        return const AsyncValue.data(null);
+      }
+      final activeTeamId = profile.value?.activeTeamId;
+      final resolved = active.firstWhere(
+        (membership) => membership.teamId == activeTeamId,
+        orElse: () => active.first,
+      );
+      return AsyncValue.data(resolved);
+    });

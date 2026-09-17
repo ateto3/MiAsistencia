@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../models/app_user.dart';
 import '../models/attendance.dart';
 import '../models/team_membership.dart';
 import '../models/team_session.dart';
-import '../models/player_motivation.dart';
 import '../providers.dart';
 import '../theme/app_theme.dart';
 import '../utils/attendance_csv.dart';
 import '../utils/file_download.dart';
 import 'app_widgets.dart';
-import 'player_attendance_profile_dialog.dart';
 
-class PlayerAttendanceOverview extends ConsumerStatefulWidget {
+class PlayerAttendanceOverview extends ConsumerWidget {
   const PlayerAttendanceOverview({
     required this.teamId,
     required this.completedSessions,
@@ -24,51 +23,8 @@ class PlayerAttendanceOverview extends ConsumerStatefulWidget {
   final List<TeamSession> completedSessions;
 
   @override
-  ConsumerState<PlayerAttendanceOverview> createState() =>
-      _PlayerAttendanceOverviewState();
-}
-
-class _PlayerAttendanceOverviewState
-    extends ConsumerState<PlayerAttendanceOverview> {
-  late Stream<List<TeamRosterMember>> _membersStream;
-  late Stream<AttendanceHistorySnapshot> _attendanceStream;
-  late int _sessionsSignature;
-
-  @override
-  void initState() {
-    super.initState();
-    _configureStreams();
-  }
-
-  @override
-  void didUpdateWidget(PlayerAttendanceOverview oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final nextSignature = Object.hashAll(
-      widget.completedSessions.map((session) => session.id),
-    );
-    if (oldWidget.teamId != widget.teamId ||
-        nextSignature != _sessionsSignature) {
-      _configureStreams();
-    }
-  }
-
-  void _configureStreams() {
-    _sessionsSignature = Object.hashAll(
-      widget.completedSessions.map((session) => session.id),
-    );
-    _membersStream = ref
-        .read(teamRepositoryProvider)
-        .watchTeamMembers(widget.teamId);
-    _attendanceStream = ref
-        .read(attendanceRepositoryProvider)
-        .watchAttendanceForSessions(
-          widget.completedSessions.map((session) => session.id),
-        );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (widget.completedSessions.isEmpty) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (completedSessions.isEmpty) {
       return const EmptyState(
         icon: Icons.query_stats_outlined,
         title: 'Todavía no hay estadísticas',
@@ -76,71 +32,48 @@ class _PlayerAttendanceOverviewState
       );
     }
 
-    return StreamBuilder<List<TeamRosterMember>>(
-      stream: _membersStream,
-      builder: (context, membersSnapshot) {
-        if (membersSnapshot.hasError) {
-          return const EmptyState(
-            icon: Icons.cloud_off_outlined,
-            title: 'No se pudo cargar la plantilla',
-            message: 'Comprueba tu conexión e inténtalo de nuevo.',
-          );
-        }
-        if (!membersSnapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
-        }
-        final players = membersSnapshot.data!
-            .where((member) => member.role == UserRole.player)
-            .toList();
-        if (players.isEmpty) {
-          return const EmptyState(
-            icon: Icons.group_off_outlined,
-            title: 'No hay jugadores',
-            message: 'Añade jugadores al equipo para ver sus estadísticas.',
-          );
-        }
+    final membersState = ref.watch(teamMembersProvider(teamId));
+    final attendanceState = ref.watch(teamAttendanceIndexProvider(teamId));
 
-        return StreamBuilder<AttendanceHistorySnapshot>(
-          stream: _attendanceStream,
-          builder: (context, attendanceSnapshot) {
-            if (attendanceSnapshot.hasError) {
-              return const EmptyState(
-                icon: Icons.cloud_off_outlined,
-                title: 'No se pudieron cargar las asistencias',
-                message: 'Comprueba tu conexión e inténtalo de nuevo.',
-              );
-            }
-            if (!attendanceSnapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-            final history = attendanceSnapshot.data!;
-            final attendance = history.attendanceBySession;
-            final loadedSessions = widget.completedSessions
-                .where(
-                  (session) => history.loadedSessionIds.contains(session.id),
-                )
-                .toList();
-            final rows = [
-              for (final player in players)
-                PlayerAttendanceTableRow(
-                  player: player,
-                  stats: buildPlayerAttendanceStats(
-                    player: player,
-                    sessions: loadedSessions,
-                    attendanceBySession: attendance,
-                  ),
-                ),
-            ];
-            return PlayerAttendanceTable(
-              rows: rows,
-              completedSessions: loadedSessions,
-              attendanceBySession: attendance,
-              loadedSessionCount: history.loadedSessionIds.length,
-              totalSessionCount: history.totalSessionCount,
-            );
-          },
-        );
-      },
+    if (membersState.hasError || attendanceState.hasError) {
+      return const EmptyState(
+        icon: Icons.cloud_off_outlined,
+        title: 'No se pudieron cargar las estadísticas',
+        message: 'Comprueba tu conexión e inténtalo de nuevo.',
+      );
+    }
+    final members = membersState.value;
+    final attendance = attendanceState.value;
+    if (members == null || attendance == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final players = members
+        .where((member) => member.role == UserRole.player)
+        .toList();
+    if (players.isEmpty) {
+      return const EmptyState(
+        icon: Icons.group_off_outlined,
+        title: 'No hay jugadores',
+        message: 'Añade jugadores al equipo para ver sus estadísticas.',
+      );
+    }
+
+    final rows = [
+      for (final player in players)
+        PlayerAttendanceTableRow(
+          player: player,
+          stats: buildPlayerAttendanceStats(
+            player: player,
+            sessions: completedSessions,
+            attendanceBySession: attendance,
+          ),
+        ),
+    ];
+    return PlayerAttendanceTable(
+      rows: rows,
+      completedSessions: completedSessions,
+      attendanceBySession: attendance,
     );
   }
 }
@@ -155,8 +88,6 @@ class PlayerAttendanceTableRow {
 class PlayerAttendanceTable extends StatefulWidget {
   const PlayerAttendanceTable({
     required this.rows,
-    required this.loadedSessionCount,
-    required this.totalSessionCount,
     this.completedSessions = const [],
     this.attendanceBySession = const {},
     this.downloadFile = downloadTextFile,
@@ -164,8 +95,6 @@ class PlayerAttendanceTable extends StatefulWidget {
   });
 
   final List<PlayerAttendanceTableRow> rows;
-  final int loadedSessionCount;
-  final int totalSessionCount;
   final List<TeamSession> completedSessions;
   final Map<String, Map<String, AttendanceRecord>> attendanceBySession;
   final void Function({required String fileName, required String content})
@@ -233,11 +162,7 @@ class _PlayerAttendanceTableState extends State<PlayerAttendanceTable> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              widget.loadedSessionCount ==
-                                      widget.totalSessionCount
-                                  ? '${widget.totalSessionCount} sesiones finalizadas'
-                                  : 'Cargando historial: ${widget.loadedSessionCount} '
-                                        'de ${widget.totalSessionCount} sesiones',
+                              '${widget.completedSessions.length} sesiones finalizadas',
                               style: TextStyle(color: Colors.blueGrey.shade600),
                             ),
                           ],
@@ -276,13 +201,8 @@ class _PlayerAttendanceTableState extends State<PlayerAttendanceTable> {
                     ),
                     PopupMenuButton<_AttendanceCsvExport>(
                       key: const ValueKey('attendance-csv-menu'),
-                      enabled:
-                          widget.rows.isNotEmpty &&
-                          widget.loadedSessionCount == widget.totalSessionCount,
-                      tooltip:
-                          widget.loadedSessionCount == widget.totalSessionCount
-                          ? 'Descargar CSV'
-                          : 'Espera a que termine de cargar el historial',
+                      enabled: widget.rows.isNotEmpty,
+                      tooltip: 'Descargar CSV',
                       icon: const Icon(Icons.download_outlined),
                       onSelected: _downloadCsv,
                       itemBuilder: (context) => const [
@@ -309,13 +229,6 @@ class _PlayerAttendanceTableState extends State<PlayerAttendanceTable> {
               },
             ),
           ),
-          if (widget.loadedSessionCount != widget.totalSessionCount)
-            LinearProgressIndicator(
-              value: widget.totalSessionCount == 0
-                  ? null
-                  : widget.loadedSessionCount / widget.totalSessionCount,
-              minHeight: 3,
-            ),
           const Divider(height: 1),
           if (sortedRows.isEmpty && widget.rows.isNotEmpty)
             Padding(
@@ -349,6 +262,7 @@ class _PlayerAttendanceTableState extends State<PlayerAttendanceTable> {
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
                   key: const ValueKey('player-attendance-table'),
+                  showCheckboxColumn: false,
                   headingRowColor: WidgetStatePropertyAll(
                     AppTheme.primary.withValues(alpha: 0.07),
                   ),
@@ -370,7 +284,11 @@ class _PlayerAttendanceTableState extends State<PlayerAttendanceTable> {
                   rows: sortedRows
                       .map(
                         (row) => DataRow(
-                          onSelectChanged: (_) => _showPlayerProfile(row),
+                          key: ValueKey(
+                            'player-attendance-row-${row.player.id}',
+                          ),
+                          onSelectChanged: (_) =>
+                              context.push('/team/players/${row.player.id}'),
                           cells: [
                             DataCell(
                               SizedBox(
@@ -437,32 +355,8 @@ class _PlayerAttendanceTableState extends State<PlayerAttendanceTable> {
     );
   }
 
-  void _showPlayerProfile(PlayerAttendanceTableRow row) {
-    final kpis = buildPlayerMotivationKpis(
-      currentPlayer: row.player,
-      members: widget.rows.map((item) => item.player),
-      completedSessions: widget.completedSessions,
-      attendanceBySession: widget.attendanceBySession,
-      referenceDate: DateTime.now(),
-    );
-
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return PlayerAttendanceProfileDialog(
-          player: row.player,
-          stats: row.stats,
-          kpis: kpis,
-          completedSessions: widget.completedSessions,
-          attendanceBySession: widget.attendanceBySession,
-        );
-      },
-    );
-  }
-
   void _downloadCsv(_AttendanceCsvExport export) {
-    if (widget.loadedSessionCount != widget.totalSessionCount ||
-        widget.rows.isEmpty) {
+    if (widget.rows.isEmpty) {
       return;
     }
     final date = _fileDate(DateTime.now());

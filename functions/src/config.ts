@@ -18,6 +18,18 @@ export const MIGRATIONS_COLLECTION = 'migrations';
 export const MIGRATION_CONFLICTS_COLLECTION = 'migrationConflicts';
 export const MIGRATION_ERRORS_COLLECTION = 'migrationErrors';
 
+export const TEAMS_COLLECTION = 'teams';
+export const SESSIONS_COLLECTION = 'sessions';
+export const ATTENDANCE_SUBCOLLECTION = 'attendance';
+
+/**
+ * Subcollection of `teams/{teamId}` mirroring each member's explicit
+ * attendance statuses, keyed by sessionId, so clients can read a player's
+ * whole history in one document instead of one listener per session. See
+ * {@link ../attendanceIndex.ts}.
+ */
+export const ATTENDANCE_INDEX_SUBCOLLECTION = 'attendanceIndex';
+
 /** Checkpoint document path for the multi-team membership migration. */
 export const MULTI_TEAM_MIGRATION_DOC_ID = 'multiTeamV2';
 

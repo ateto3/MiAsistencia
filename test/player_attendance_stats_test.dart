@@ -1,42 +1,12 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mi_asistencia/src/models/app_user.dart';
 import 'package:mi_asistencia/src/models/attendance.dart';
 import 'package:mi_asistencia/src/models/team_session.dart';
-import 'package:mi_asistencia/src/repositories/attendance_repository.dart';
 import 'package:mi_asistencia/src/theme/app_theme.dart';
 import 'package:mi_asistencia/src/widgets/player_attendance_table.dart';
 
 void main() {
-  test(
-    'attendance history emits progress before every session loads',
-    () async {
-      final session = StreamController<Map<String, AttendanceRecord>>();
-      final history = combineAttendanceStreams({'session-1': session.stream});
-
-      final expectation = expectLater(
-        history.take(2),
-        emitsInOrder([
-          isA<AttendanceHistorySnapshot>()
-              .having((value) => value.loadedSessionIds.length, 'loaded', 0)
-              .having((value) => value.totalSessionCount, 'total', 1),
-          isA<AttendanceHistorySnapshot>()
-              .having((value) => value.loadedSessionIds, 'loaded', {
-                'session-1',
-              })
-              .having((value) => value.isComplete, 'complete', isTrue),
-        ]),
-      );
-
-      await Future<void>.delayed(Duration.zero);
-      session.add(const <String, AttendanceRecord>{});
-      await expectation;
-      await session.close();
-    },
-  );
-
   test('builds the requested historical player statistics', () {
     const userId = 'player-1';
     final statuses = [
@@ -122,8 +92,6 @@ void main() {
         theme: AppTheme.light,
         home: const Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 12,
-            totalSessionCount: 12,
             rows: [PlayerAttendanceTableRow(player: player, stats: stats)],
           ),
         ),
@@ -148,27 +116,6 @@ void main() {
     ]) {
       expect(find.text(heading), findsOneWidget);
     }
-  });
-
-  testWidgets('renders partial history without an indefinite spinner', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: const Scaffold(
-          body: PlayerAttendanceTable(
-            loadedSessionCount: 1,
-            totalSessionCount: 3,
-            rows: [],
-          ),
-        ),
-      ),
-    );
-
-    expect(find.text('Cargando historial: 1 de 3 sesiones'), findsOneWidget);
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
   testWidgets('sorts players from every table heading', (tester) async {
@@ -249,13 +196,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: Scaffold(
-          body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
-            rows: rows,
-          ),
-        ),
+        home: Scaffold(body: PlayerAttendanceTable(rows: rows)),
       ),
     );
 
@@ -353,8 +294,6 @@ void main() {
         theme: AppTheme.light,
         home: Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 1,
-            totalSessionCount: 1,
             rows: const [
               PlayerAttendanceTableRow(player: ana, stats: anaStats),
               PlayerAttendanceTableRow(player: bea, stats: beaStats),
@@ -465,8 +404,6 @@ void main() {
         theme: AppTheme.light,
         home: Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
             rows: const [
               PlayerAttendanceTableRow(player: ana, stats: anaStats),
               PlayerAttendanceTableRow(player: bea, stats: beaStats),
@@ -517,8 +454,6 @@ void main() {
         theme: AppTheme.light,
         home: Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
             rows: const [
               PlayerAttendanceTableRow(player: player, stats: stats),
             ],
@@ -566,8 +501,6 @@ void main() {
         theme: AppTheme.light,
         home: Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
             rows: const [
               PlayerAttendanceTableRow(player: player, stats: stats),
             ],
@@ -618,8 +551,6 @@ void main() {
         theme: AppTheme.light,
         home: Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
             rows: const [
               PlayerAttendanceTableRow(player: player, stats: stats),
             ],
@@ -698,13 +629,7 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: AppTheme.light,
-        home: Scaffold(
-          body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
-            rows: rows,
-          ),
-        ),
+        home: Scaffold(body: PlayerAttendanceTable(rows: rows)),
       ),
     );
 
@@ -751,8 +676,6 @@ void main() {
         theme: AppTheme.light,
         home: Scaffold(
           body: PlayerAttendanceTable(
-            loadedSessionCount: 10,
-            totalSessionCount: 10,
             rows: const [
               PlayerAttendanceTableRow(player: player, stats: stats),
             ],

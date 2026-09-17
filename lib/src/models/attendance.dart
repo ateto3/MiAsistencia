@@ -289,20 +289,6 @@ class PlayerAttendanceStats {
       : (attendedSessionCount * 100 / eligibleSessionCount).round();
 }
 
-class AttendanceHistorySnapshot {
-  const AttendanceHistorySnapshot({
-    required this.attendanceBySession,
-    required this.loadedSessionIds,
-    required this.totalSessionCount,
-  });
-
-  final Map<String, Map<String, AttendanceRecord>> attendanceBySession;
-  final Set<String> loadedSessionIds;
-  final int totalSessionCount;
-
-  bool get isComplete => loadedSessionIds.length == totalSessionCount;
-}
-
 PlayerAttendanceStats buildPlayerAttendanceStats({
   required TeamRosterMember player,
   required Iterable<TeamSession> sessions,
@@ -319,10 +305,7 @@ PlayerAttendanceStats buildPlayerAttendanceStats({
   var injuryCount = 0;
 
   for (final session in sessions) {
-    if (isPresumedAbsentAt(
-      member: player,
-      sessionTime: session.startTime,
-    )) {
+    if (isPresumedAbsentAt(member: player, sessionTime: session.startTime)) {
       continue;
     }
     final status = resolveAttendanceStatus(
@@ -435,4 +418,40 @@ class AttendanceDraft {
 
   final AttendanceStatus status;
   final String note;
+}
+
+/// Pure transformation from the server-maintained `attendanceIndex` mirror
+/// (memberId -> that member's raw `statuses` field, of otherwise-unknown
+/// shape) into the `attendanceBySession` map the stat/chart/CSV builders
+/// take.
+///
+/// Defensive by design: a malformed `statuses` value (or a malformed key
+/// within it) for one member is skipped rather than thrown, so one corrupt
+/// document can never break every player's data — matching the fallback
+/// behavior [AttendanceStatus.fromFirestore] already applies to an
+/// unrecognized status value.
+Map<String, Map<String, AttendanceRecord>> buildAttendanceBySessionFromIndex(
+  Map<String, Object?> rawStatusesByMemberId,
+) {
+  final attendanceBySession = <String, Map<String, AttendanceRecord>>{};
+  for (final memberEntry in rawStatusesByMemberId.entries) {
+    final memberId = memberEntry.key;
+    final rawStatuses = memberEntry.value;
+    if (rawStatuses is! Map) {
+      continue;
+    }
+    for (final statusEntry in rawStatuses.entries) {
+      final sessionId = statusEntry.key;
+      if (sessionId is! String) {
+        continue;
+      }
+      attendanceBySession
+              .putIfAbsent(sessionId, () => <String, AttendanceRecord>{})[memberId] =
+          AttendanceRecord(
+            userId: memberId,
+            status: AttendanceStatus.fromFirestore(statusEntry.value),
+          );
+    }
+  }
+  return attendanceBySession;
 }

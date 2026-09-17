@@ -10,3 +10,5 @@ if (getApps().length === 0) {
 
 export { multiTeamMigration } from './httpMigration';
 export { legacyUserCompatSync } from './compatTrigger';
+export { attendanceIndexSync, attendanceIndexSessionCleanup } from './attendanceIndexTrigger';
+export { attendanceIndexRebuild } from './attendanceIndexRebuild';

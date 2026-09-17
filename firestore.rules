@@ -146,6 +146,17 @@ service cloud.firestore {
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.joinCode == resource.data.joinCode;
       allow delete: if isTeamCoach(teamId);
+
+      // Server-maintained mirror of each member's explicit attendance
+      // statuses across every session (see functions/src/attendanceIndex.ts),
+      // read by the Dart client instead of one listener per session. Only
+      // the Admin SDK (the attendanceIndexSync trigger / rebuild endpoint)
+      // writes it; the read grant matches what a client can already see by
+      // reading every session's attendance subcollection directly.
+      match /attendanceIndex/{memberId} {
+        allow read: if belongsToTeam(teamId);
+        allow write: if false;
+      }
     }
 
     match /teamInvites/{teamId} {

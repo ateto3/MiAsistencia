@@ -100,16 +100,10 @@ class _FakeTeamRepository implements TeamRepository {
 
 class _FakeAttendanceRepository implements AttendanceRepository {
   @override
-  Stream<AttendanceHistorySnapshot> watchAttendanceForSessions(
-    Iterable<String> sessionIds,
+  Stream<Map<String, Map<String, AttendanceRecord>>> watchTeamAttendanceIndex(
+    String teamId,
   ) {
-    return Stream.value(
-      const AttendanceHistorySnapshot(
-        attendanceBySession: {},
-        loadedSessionIds: {},
-        totalSessionCount: 0,
-      ),
-    );
+    return Stream.value(const <String, Map<String, AttendanceRecord>>{});
   }
 
   @override

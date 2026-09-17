@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../models/attendance.dart';
@@ -70,13 +68,28 @@ class AttendanceRepository {
         );
   }
 
-  Stream<AttendanceHistorySnapshot> watchAttendanceForSessions(
-    Iterable<String> sessionIds,
+  /// Watches every team member's explicit attendance history in one
+  /// listener, via the server-maintained mirror at
+  /// `teams/{teamId}/attendanceIndex/{memberId}` (kept in sync by the
+  /// `attendanceIndexSync` Cloud Function). Returns the same
+  /// `attendanceBySession` shape (outer key: sessionId, inner key: memberId)
+  /// the stat/chart/CSV builders already take, so callers that previously
+  /// opened one listener per session via `watchAttendanceForSessions` can
+  /// switch to this without changing any downstream code.
+  Stream<Map<String, Map<String, AttendanceRecord>>> watchTeamAttendanceIndex(
+    String teamId,
   ) {
-    final ids = sessionIds.toSet().toList(growable: false);
-    return combineAttendanceStreams({
-      for (final sessionId in ids) sessionId: watchSessionAttendance(sessionId),
-    });
+    return _firestore
+        .collection('teams')
+        .doc(teamId)
+        .collection('attendanceIndex')
+        .snapshots()
+        .map(
+          (snapshot) => buildAttendanceBySessionFromIndex({
+            for (final document in snapshot.docs)
+              document.id: document.data()['statuses'],
+          }),
+        );
   }
 
   Future<void> saveAttendance({
@@ -113,8 +126,7 @@ class AttendanceRepository {
     required String note,
   }) async {
     final trimmedNote = note.trim().isEmpty ? null : note.trim();
-    for (final chunk
-        in _chunked(sessionIds, _maxAttendanceBatchSize)) {
+    for (final chunk in _chunked(sessionIds, _maxAttendanceBatchSize)) {
       final batch = _firestore.batch();
       for (final sessionId in chunk) {
         final reference = _attendanceReference(sessionId, userId);
@@ -163,85 +175,4 @@ class AttendanceRepository {
         .collection('attendance')
         .doc(userId);
   }
-}
-
-Stream<AttendanceHistorySnapshot> combineAttendanceStreams(
-  Map<String, Stream<Map<String, AttendanceRecord>>> streams, {
-  Duration initialLoadTimeout = const Duration(seconds: 15),
-}) {
-  if (streams.isEmpty) {
-    return Stream.value(
-      const AttendanceHistorySnapshot(
-        attendanceBySession: {},
-        loadedSessionIds: {},
-        totalSessionCount: 0,
-      ),
-    );
-  }
-
-  late StreamController<AttendanceHistorySnapshot> controller;
-  final attendanceBySession = <String, Map<String, AttendanceRecord>>{};
-  final loadedSessionIds = <String>{};
-  final subscriptions = <StreamSubscription<Map<String, AttendanceRecord>>>[];
-  Timer? initialLoadTimer;
-
-  void emit() {
-    controller.add(
-      AttendanceHistorySnapshot(
-        attendanceBySession:
-            Map<String, Map<String, AttendanceRecord>>.unmodifiable({
-              for (final entry in attendanceBySession.entries)
-                entry.key: Map<String, AttendanceRecord>.unmodifiable(
-                  entry.value,
-                ),
-            }),
-        loadedSessionIds: Set<String>.unmodifiable(loadedSessionIds),
-        totalSessionCount: streams.length,
-      ),
-    );
-  }
-
-  controller = StreamController<AttendanceHistorySnapshot>(
-    onListen: () {
-      scheduleMicrotask(emit);
-      initialLoadTimer = Timer(initialLoadTimeout, () {
-        if (loadedSessionIds.length != streams.length) {
-          controller.addError(
-            TimeoutException(
-              'No se pudo cargar todo el historial de asistencias.',
-            ),
-          );
-        }
-      });
-      for (final entry in streams.entries) {
-        subscriptions.add(
-          entry.value.listen((attendance) {
-            attendanceBySession[entry.key] = attendance;
-            loadedSessionIds.add(entry.key);
-            if (loadedSessionIds.length == streams.length) {
-              initialLoadTimer?.cancel();
-            }
-            emit();
-          }, onError: controller.addError),
-        );
-      }
-    },
-    onPause: () {
-      for (final subscription in subscriptions) {
-        subscription.pause();
-      }
-    },
-    onResume: () {
-      for (final subscription in subscriptions) {
-        subscription.resume();
-      }
-    },
-    onCancel: () async {
-      initialLoadTimer?.cancel();
-      await Future.wait(
-        subscriptions.map((subscription) => subscription.cancel()),
-      );
-    },
-  );
-  return controller.stream;
 }

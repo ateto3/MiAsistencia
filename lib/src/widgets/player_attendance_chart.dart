@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../models/attendance.dart';
-import '../models/player_motivation.dart';
 import '../models/team_membership.dart';
 import '../models/team_session.dart';
 import '../theme/app_theme.dart';
@@ -20,274 +19,34 @@ class PlayerAttendanceChartPoint {
   final int sessionCount;
 }
 
-class PlayerAttendanceProfileDialog extends StatelessWidget {
-  const PlayerAttendanceProfileDialog({
+/// Weekly (or monthly, once the history spans 90+ days) evolution of a
+/// player's attendance participation. Renders nothing when there isn't
+/// enough history to plot.
+class PlayerAttendanceEvolutionChart extends StatelessWidget {
+  const PlayerAttendanceEvolutionChart({
     required this.player,
-    required this.stats,
-    required this.kpis,
     required this.completedSessions,
     required this.attendanceBySession,
     super.key,
   });
 
   final TeamRosterMember player;
-  final PlayerAttendanceStats stats;
-  final PlayerMotivationKpis kpis;
   final List<TeamSession> completedSessions;
   final Map<String, Map<String, AttendanceRecord>> attendanceBySession;
 
   @override
   Widget build(BuildContext context) {
-    final chartData = buildPlayerAttendanceChartData(
+    final data = buildPlayerAttendanceChartData(
       player: player,
       completedSessions: completedSessions,
       attendanceBySession: attendanceBySession,
     );
 
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: 560,
-          maxHeight: MediaQuery.sizeOf(context).height * 0.85,
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 22, 24, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      player.fullName,
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Cerrar',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              _AttendanceSummary(
-                percentage: stats.attendancePercentage,
-                attended: stats.attendedSessionCount,
-                total: stats.eligibleSessionCount,
-              ),
-              const SizedBox(height: 16),
-              _StreakCard(streak: kpis.attendanceStreak),
-              const SizedBox(height: 20),
-              Text(
-                'Estadísticas',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
-              ),
-              const SizedBox(height: 10),
-              _StatisticsGrid(stats: stats),
-              const SizedBox(height: 24),
-              if (chartData.points.isNotEmpty) ...[
-                _AttendanceChartSection(data: chartData),
-              ],
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cerrar'),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+    if (data.points.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
-class _AttendanceSummary extends StatelessWidget {
-  const _AttendanceSummary({
-    required this.percentage,
-    required this.attended,
-    required this.total,
-  });
-
-  final int? percentage;
-  final int attended;
-  final int total;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppTheme.primary.withValues(alpha: 0.07),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        children: [
-          Text(
-            percentage == null ? '—' : '$percentage%',
-            style: Theme.of(context).textTheme.displaySmall?.copyWith(
-              color: AppTheme.primary,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 4),
-          const Text(
-            'Asistencia',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            '$attended / $total sesiones',
-            style: TextStyle(color: Colors.blueGrey.shade700),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StreakCard extends StatelessWidget {
-  const _StreakCard({required this.streak});
-
-  final int streak;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: Colors.orange.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.local_fire_department_outlined,
-            color: Colors.deepOrange,
-          ),
-          const SizedBox(width: 10),
-          const Expanded(
-            child: Text(
-              'Racha actual',
-              style: TextStyle(fontWeight: FontWeight.w700),
-            ),
-          ),
-          Text(
-            '$streak sesiones',
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StatisticsGrid extends StatelessWidget {
-  const _StatisticsGrid({required this.stats});
-
-  final PlayerAttendanceStats stats;
-
-  @override
-  Widget build(BuildContext context) {
-    final items = [
-      _StatisticItem(
-        icon: Icons.check_circle_outline,
-        label: 'Asistencias',
-        value: stats.attendanceCount,
-      ),
-      _StatisticItem(
-        icon: Icons.schedule_outlined,
-        label: 'Retrasos',
-        value: stats.lateCount,
-      ),
-      _StatisticItem(
-        icon: Icons.fitness_center_outlined,
-        label: 'Físico',
-        value: stats.physicalCount,
-      ),
-      _StatisticItem(
-        icon: Icons.sports_handball_outlined,
-        label: 'Pista',
-        value: stats.courtCount,
-      ),
-      _StatisticItem(
-        icon: Icons.cancel_outlined,
-        label: 'Faltas',
-        value: stats.absenceCount,
-      ),
-      _StatisticItem(
-        icon: Icons.healing_outlined,
-        label: 'Lesiones',
-        value: stats.injuryCount,
-      ),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = (constraints.maxWidth - 10) / 2;
-
-        return Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            for (final item in items)
-              SizedBox(
-                width: width,
-                child: _StatisticTile(item: item),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _StatisticItem {
-  const _StatisticItem({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
-
-  final IconData icon;
-  final String label;
-  final int value;
-}
-
-class _StatisticTile extends StatelessWidget {
-  const _StatisticTile({required this.item});
-
-  final _StatisticItem item;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 72),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.grey.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Icon(item.icon, size: 20, color: AppTheme.primary),
-          const SizedBox(width: 10),
-          Expanded(child: Text(item.label, overflow: TextOverflow.ellipsis)),
-          Text(
-            '${item.value}',
-            style: const TextStyle(fontWeight: FontWeight.w900),
-          ),
-        ],
-      ),
-    );
+    return _AttendanceChartSection(data: data);
   }
 }
 
@@ -332,8 +91,8 @@ class _AttendanceChartSection extends StatelessWidget {
         SizedBox(height: 190, child: _AttendanceBarChart(points: data.points)),
         const SizedBox(height: 6),
         Text(
-          'Físico + pista = 100%. Solo físico o solo pista = 50%. '
-          'Faltas y lesiones = 0%.',
+          'Asistencia, retraso, solo físico o solo pista cuentan como '
+          'participación. Faltas, lesiones y no convocado no puntúan.',
           style: TextStyle(
             color: Colors.blueGrey.shade600,
             fontSize: 11,
@@ -560,24 +319,7 @@ _AttendanceChartData buildPlayerAttendanceChartData({
 }
 
 double participationForAttendanceChart(AttendanceStatus status) {
-  switch (status) {
-    case AttendanceStatus.attending:
-    case AttendanceStatus.late:
-    case AttendanceStatus.lateUnannounced:
-      return 1.0;
-
-    case AttendanceStatus.courtOnly:
-    case AttendanceStatus.gymOnly:
-      return 0.5;
-
-    case AttendanceStatus.absent:
-    case AttendanceStatus.absentUnannounced:
-    case AttendanceStatus.absentLateNotice:
-    case AttendanceStatus.injured:
-    case AttendanceStatus.noConvocado:
-    case AttendanceStatus.notApplicable:
-      return 0.0;
-  }
+  return status.countsForAttendancePercentage ? 1.0 : 0.0;
 }
 
 DateTime _startOfWeek(DateTime value) {

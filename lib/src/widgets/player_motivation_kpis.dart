@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/attendance.dart';
 import '../models/player_motivation.dart';
 import '../models/team_membership.dart';
 import '../models/team_session.dart';
@@ -25,6 +24,9 @@ class _ExpandableKpiCard extends StatefulWidget {
     required this.percentage,
     required this.expandedChild,
     required this.loading,
+    this.initiallyExpanded = false,
+    this.expanded,
+    this.onExpandedChanged,
   });
 
   final ValueKey<String> containerKey;
@@ -34,13 +36,35 @@ class _ExpandableKpiCard extends StatefulWidget {
   final int? percentage;
   final Widget expandedChild;
   final bool loading;
+  final bool initiallyExpanded;
+
+  /// When non-null, the expanded/collapsed state is controlled by the
+  /// caller (via [onExpandedChanged]) instead of being tracked internally.
+  /// Used so the state can survive this widget being torn down and rebuilt,
+  /// e.g. when navigating between players.
+  final bool? expanded;
+  final ValueChanged<bool>? onExpandedChanged;
 
   @override
   State<_ExpandableKpiCard> createState() => _ExpandableKpiCardState();
 }
 
 class _ExpandableKpiCardState extends State<_ExpandableKpiCard> {
-  bool _expanded = false;
+  late bool _expanded = widget.expanded ?? widget.initiallyExpanded;
+
+  @override
+  void didUpdateWidget(covariant _ExpandableKpiCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.expanded != null && widget.expanded != _expanded) {
+      _expanded = widget.expanded!;
+    }
+  }
+
+  void _toggle() {
+    final next = !_expanded;
+    setState(() => _expanded = next);
+    widget.onExpandedChanged?.call(next);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -69,7 +93,7 @@ class _ExpandableKpiCardState extends State<_ExpandableKpiCard> {
                     : 'Expandir indicadores',
                 child: InkWell(
                   key: widget.toggleKey,
-                  onTap: () => setState(() => _expanded = !_expanded),
+                  onTap: _toggle,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 18,
@@ -172,7 +196,7 @@ class _ExpandableKpiCardState extends State<_ExpandableKpiCard> {
   }
 }
 
-class TeamPerformancePanel extends ConsumerStatefulWidget {
+class TeamPerformancePanel extends ConsumerWidget {
   const TeamPerformancePanel({
     required this.user,
     required this.teamId,
@@ -187,114 +211,61 @@ class TeamPerformancePanel extends ConsumerStatefulWidget {
   final List<TeamSession> completedSessions;
 
   @override
-  ConsumerState<TeamPerformancePanel> createState() =>
-      _TeamPerformancePanelState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final membersState = ref.watch(teamMembersProvider(teamId));
+    final attendanceState = ref.watch(teamAttendanceIndexProvider(teamId));
 
-class _TeamPerformancePanelState extends ConsumerState<TeamPerformancePanel> {
-  late Stream<List<TeamRosterMember>> _membersStream;
-  late Stream<AttendanceHistorySnapshot> _attendanceStream;
-  late int _sessionsSignature;
-
-  @override
-  void initState() {
-    super.initState();
-    _configureStreams();
-  }
-
-  @override
-  void didUpdateWidget(covariant TeamPerformancePanel oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final nextSignature = Object.hashAll(
-      widget.completedSessions.map((session) => session.id),
-    );
-    if (oldWidget.teamId != widget.teamId ||
-        nextSignature != _sessionsSignature) {
-      _configureStreams();
+    if (membersState.hasError) {
+      return _fallback(message: 'No se pudieron cargar los datos.');
     }
-  }
+    final members = membersState.value;
+    if (members == null) {
+      return _fallback(loading: true);
+    }
 
-  void _configureStreams() {
-    _sessionsSignature = Object.hashAll(
-      widget.completedSessions.map((session) => session.id),
-    );
-    _membersStream = ref
-        .read(teamRepositoryProvider)
-        .watchTeamMembers(widget.teamId);
-    _attendanceStream = ref
-        .read(attendanceRepositoryProvider)
-        .watchAttendanceForSessions(
-          widget.completedSessions.map((session) => session.id),
-        );
-  }
+    if (attendanceState.hasError) {
+      return _fallback(message: 'No se pudo cargar el historial.');
+    }
+    final attendanceBySession = attendanceState.value;
+    if (attendanceBySession == null) {
+      return _fallback(loading: true);
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<List<TeamRosterMember>>(
-      stream: _membersStream,
-      builder: (context, membersSnapshot) {
-        if (membersSnapshot.hasError) {
-          return _fallback(message: 'No se pudieron cargar los datos.');
-        }
-        if (!membersSnapshot.hasData) {
-          return _fallback(loading: true);
-        }
-
-        return StreamBuilder<AttendanceHistorySnapshot>(
-          stream: _attendanceStream,
-          builder: (context, attendanceSnapshot) {
-            if (attendanceSnapshot.hasError) {
-              return _fallback(message: 'No se pudo cargar el historial.');
-            }
-            if (!attendanceSnapshot.hasData) {
-              return _fallback(loading: true);
-            }
-
-            final history = attendanceSnapshot.data!;
-            final loadedSessions = widget.completedSessions
-                .where(
-                  (session) => history.loadedSessionIds.contains(session.id),
-                )
-                .toList();
-            if (widget.user.isCoach) {
-              return CoachTeamPerformanceCard(
-                teamName: widget.teamName,
-                trend: buildTeamAttendanceTrend(
-                  members: membersSnapshot.data!,
-                  completedSessions: loadedSessions,
-                  attendanceBySession: history.attendanceBySession,
-                  referenceDate: DateTime.now(),
-                ),
-                loading: !history.isComplete,
-              );
-            }
-            return PlayerMotivationCard(
-              teamName: widget.teamName,
-              kpis: buildPlayerMotivationKpis(
-                currentPlayer: widget.user,
-                members: membersSnapshot.data!,
-                completedSessions: loadedSessions,
-                attendanceBySession: history.attendanceBySession,
-                referenceDate: DateTime.now(),
-              ),
-              loading: !history.isComplete,
-            );
-          },
-        );
-      },
+    if (user.isCoach) {
+      return CoachTeamPerformanceCard(
+        teamName: teamName,
+        trend: buildTeamAttendanceTrend(
+          members: members,
+          completedSessions: completedSessions,
+          attendanceBySession: attendanceBySession,
+          referenceDate: DateTime.now(),
+        ),
+        loading: false,
+      );
+    }
+    return PlayerMotivationCard(
+      teamName: teamName,
+      kpis: buildPlayerMotivationKpis(
+        currentPlayer: user,
+        members: members,
+        completedSessions: completedSessions,
+        attendanceBySession: attendanceBySession,
+        referenceDate: DateTime.now(),
+      ),
+      loading: false,
     );
   }
 
   Widget _fallback({bool loading = false, String? message}) {
-    return widget.user.isCoach
+    return user.isCoach
         ? CoachTeamPerformanceCard(
-            teamName: widget.teamName,
+            teamName: teamName,
             trend: null,
             loading: loading,
             message: message,
           )
         : PlayerMotivationCard(
-            teamName: widget.teamName,
+            teamName: teamName,
             kpis: null,
             loading: loading,
             message: message,
@@ -308,6 +279,11 @@ class PlayerMotivationCard extends StatelessWidget {
     required this.kpis,
     this.loading = false,
     this.message,
+    this.title = 'Tu rendimiento',
+    this.subtitleLabel = 'Jugador',
+    this.initiallyExpanded = false,
+    this.expanded,
+    this.onExpandedChanged,
     super.key,
   });
 
@@ -315,6 +291,14 @@ class PlayerMotivationCard extends StatelessWidget {
   final PlayerMotivationKpis? kpis;
   final bool loading;
   final String? message;
+  final String title;
+  final String subtitleLabel;
+  final bool initiallyExpanded;
+
+  /// When non-null, controls the card's expanded state externally (see
+  /// [_ExpandableKpiCard.expanded]) instead of tracking it internally.
+  final bool? expanded;
+  final ValueChanged<bool>? onExpandedChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -324,8 +308,11 @@ class PlayerMotivationCard extends StatelessWidget {
     return _ExpandableKpiCard(
       containerKey: const ValueKey('player-motivation-kpis'),
       toggleKey: const ValueKey('toggle-player-kpis'),
-      title: 'Tu rendimiento',
-      subtitle: '$teamName · Jugador',
+      initiallyExpanded: initiallyExpanded,
+      expanded: expanded,
+      onExpandedChanged: onExpandedChanged,
+      title: title,
+      subtitle: '$teamName · $subtitleLabel',
       percentage: kpis?.recentAttendancePercentage,
       loading: loading,
       expandedChild: Column(
